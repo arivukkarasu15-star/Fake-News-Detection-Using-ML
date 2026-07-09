@@ -333,11 +333,3 @@ nltk.download('punkt')
 ## License
 
 This project is for educational purposes (Final Year Project).
-
----
-
-## Acknowledgments
-
-- Dataset providers (Kaggle, ISOT, etc.)
-- scikit-learn library
-- NLTK library
