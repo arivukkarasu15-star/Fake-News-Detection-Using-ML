@@ -895,10 +895,16 @@ def check_with_groq(query, api_key, live_context=""):
                 print(f"DEBUG: Groq absence-of-evidence FAKE suppressed. Explanation: {explanation[:100]}")
                 return None  # Let pipeline stay Unverified — do not fabricate a FAKE verdict
 
-        # UNVERIFIED status from new prompt — return None so pipeline stays Unverified
+        # UNVERIFIED status from new prompt — treat as a real AI signal instead of
+        # discarding it. AI fact-judgment should take priority over ML style score.
         if status == 'UNVERIFIED':
-            print(f"DEBUG: Groq returned UNVERIFIED — passing through to next verifier")
-            return None
+            print(f"DEBUG: Groq returned UNVERIFIED")
+            return (
+                'unverified',
+                float(data.get('confidence', 60)),
+                explanation or 'Live context was insufficient to confirm or deny this claim.',
+                f"Groq AI ({data.get('source_type', 'Knowledge Base')})"
+            )
 
         # SELF-CONTRADICTION GUARD:
         # Catches cases where Groq says FAKE but its own explanation actually
@@ -1001,7 +1007,7 @@ def check_with_openrouter(query, api_key, live_context=""):
                 ],
                 "response_format": {"type": "json_object"}
             }),
-            timeout=10
+            timeout=25  # Increased from 10 — was causing gunicorn worker timeout/kill
         )
         
         if response.status_code == 200:
@@ -1039,7 +1045,13 @@ def check_with_openrouter(query, api_key, live_context=""):
                     return None
 
             if status == 'UNVERIFIED':
-                return None
+                print(f"DEBUG: OpenRouter returned UNVERIFIED")
+                return (
+                    'unverified',
+                    float(data.get('confidence', 60)),
+                    explanation_or or 'Live context was insufficient to confirm or deny this claim.',
+                    f"OpenRouter ({data.get('source_type', 'AI Knowledge')})"
+                )
 
             if data.get('confidence', 0) >= 70 and status in ['REAL', 'FAKE', 'TRUE']:
                 final_status = 'real' if status in ['REAL', 'TRUE'] else 'fake'
@@ -1052,6 +1064,9 @@ def check_with_openrouter(query, api_key, live_context=""):
         else:
              print(f"OpenRouter API error: {response.status_code} - {response.text}")
             
+    except requests.exceptions.Timeout:
+        print(f"OpenRouter timeout — skipping")
+        return None
     except Exception as e:
         print(f"OpenRouter AI Check error: {e}")
         
@@ -1139,6 +1154,7 @@ def predict():
         message = "Analysis based on linguistic style patterns."
         live_url = None
         api_error = False
+        ai_resolved = False  # True once an AI layer (Groq/OpenRouter) gives a definitive verdict
 
         match = None
         
@@ -1179,36 +1195,31 @@ def predict():
             live_context = ""    # BUG-5 FIX: initialize explicitly
             context_urls = []
             
-            # STEP 2a: Gemini Search-Grounded fact-check (highest priority)
-            if gemini_key:
-                gemini_result = check_with_gemini(text, gemini_key)
-                # FIX: Log when Gemini returns None so quota/timeout failures are visible in console
-                if gemini_result is None:
-                    print(f"DEBUG: Gemini returned None for query: {text[:60]!r} — falling through to Groq")
-                if gemini_result:
-                    gem_pred, gem_conf, gem_msg, gem_source = gemini_result[:4]
-                    gem_url = gemini_result[4] if len(gemini_result) > 4 else None
-                    if gem_conf >= 70:
-                        prediction = gem_pred
-                        conf = max(conf, gem_conf)
-                        verification_status = "Verified by Google AI" if gem_pred == "real" else "Debunked by Google AI"
-                        message = gem_msg
-                        match = {'source': {'name': gem_source}}
-                        if gem_url:
-                            live_url = gem_url
-            
-            # STEP 2b: Groq AI fallback (if Gemini unverified/unavailable)
+            # STEP 2a: Gemini SKIPPED — free tier quota exhausted (limit: 0).
+            # Groq is now the primary Layer 3 AI check.
+
+            # STEP 2b: Groq AI — PRIMARY Layer 3 check
             if verification_status == "Unverified" and groq_key:
                 live_context, context_urls = get_live_context(search_query, serpapi_key, newsapi_key)
                 groq_result = check_with_groq(text, groq_key, live_context)
                 if groq_result:
                     gro_pred, gro_conf, gro_msg, gro_source = groq_result
-                    if gro_conf >= 70:
+                    if gro_pred == 'unverified':
+                        # AI fact-check could not confirm the claim — treat as FAKE
+                        # rather than falling back to the ML writing-style score.
+                        prediction = "fake"
+                        conf = max(conf, gro_conf)
+                        verification_status = "Unverified by AI"
+                        message = f"AI fact-check could not confirm this claim: {gro_msg}"
+                        match = {'source': {'name': gro_source}}
+                        ai_resolved = True
+                    elif gro_conf >= 70:
                         prediction = gro_pred
                         conf = max(conf, gro_conf)
                         verification_status = "Verified by Groq AI" if gro_pred == "real" else "Debunked by Groq AI"
                         message = gro_msg
                         match = {'source': {'name': gro_source}}
+                        ai_resolved = True
                         if context_urls and not live_url:
                             live_url = get_source_url_for_verdict(text, context_urls, groq_key, gemini_key, verdict=gro_pred)
             
@@ -1220,12 +1231,22 @@ def predict():
                 or_result = check_with_openrouter(text, openrouter_key, live_context)
                 if or_result:
                     or_pred, or_conf, or_msg, or_source = or_result
-                    if or_conf >= 70:
+                    if or_pred == 'unverified':
+                        # AI fact-check could not confirm the claim — treat as FAKE
+                        # rather than falling back to the ML writing-style score.
+                        prediction = "fake"
+                        conf = max(conf, or_conf)
+                        verification_status = "Unverified by AI"
+                        message = f"AI fact-check could not confirm this claim: {or_msg}"
+                        match = {'source': {'name': or_source}}
+                        ai_resolved = True
+                    elif or_conf >= 70:
                         prediction = or_pred
                         conf = max(conf, or_conf)
                         verification_status = "Verified by OpenRouter AI" if or_pred == "real" else "Debunked by OpenRouter AI"
                         message = or_msg
                         match = {'source': {'name': or_source}}
+                        ai_resolved = True
                         if context_urls and not live_url:
                             live_url = get_source_url_for_verdict(text, context_urls, groq_key, gemini_key, verdict=or_pred)
             
@@ -1770,24 +1791,10 @@ def predict_image():
             if verification_status == "Unverified":
                 search_query = search_text[:100].replace('\n', ' ')
                 
-                # STEP 5a: Gemini Search-Grounded check (FIRST)
-                if gemini_key:
-                    gemini_result = check_with_gemini(search_query, gemini_key)
-                    # FIX: Log Gemini None so quota/timeout failures are visible
-                    if gemini_result is None:
-                        print(f"DEBUG [image]: Gemini returned None for: {search_query[:60]!r}")
-                    if gemini_result:
-                        gem_pred, gem_conf, gem_msg, gem_source = gemini_result[:4]
-                        gem_url = gemini_result[4] if len(gemini_result) > 4 else None
-                        prediction = gem_pred
-                        final_label = gem_pred.upper()
-                        conf = max(conf, gem_conf)
-                        verification_status = "Verified by Google AI" if gem_pred == "real" else "Debunked by Google AI"
-                        message = gem_msg
-                        live_match = {'source': {'name': gem_source}}
-                        if gem_url: live_match['url'] = gem_url
-                
-                # STEP 5b: Groq AI fallback
+                # STEP 5a: Gemini SKIPPED — free tier quota exhausted.
+                # Groq is now primary Layer 3.
+
+                # STEP 5b: Groq AI — PRIMARY Layer 3 check
                 if "context_urls_img" not in locals():
                     context_urls_img = []  # BUG-6 FIX: ensure always defined
                 if verification_status == "Unverified" and groq_key:
