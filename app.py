@@ -501,7 +501,8 @@ def check_semantic_consistency(claim, matched_title, groq_key, gemini_key=None):
     - Answer 'NO' if the headline contradicts the claim (e.g. claim says lost, headline says won).
     - Answer 'NO' if the headline is about a RELATED but DIFFERENT topic (e.g. claim is about winning a tournament, but headline is a player profile or a different match).
     - Answer 'NO' if the headline does NOT confirm the SPECIFIC event or outcome stated in the claim.
-    - Answer 'YES' ONLY if the headline directly confirms the exact claim being made.
+    - Answer 'NO' if the claim contains a specific date, year, number, or statistic that the headline does not explicitly confirm — do not assume it's correct just because the general topic matches. If you independently know the claimed date/number/fact is factually WRONG (e.g. a well-known historical date stated incorrectly), answer 'NO' regardless of what the headline says.
+    - Answer 'YES' ONLY if the headline directly confirms the exact claim being made, including any specific dates or numbers stated.
     
     Respond ONLY with the exact word 'YES' or 'NO'. No other text.
     """
@@ -511,15 +512,20 @@ def check_semantic_consistency(claim, matched_title, groq_key, gemini_key=None):
         try:
             client = Groq(api_key=groq_key)
             response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="openai/gpt-oss-120b",
                 messages=[
                     {"role": "system", "content": "You are a strict semantic logical analyzer."},
                     {"role": "user", "content": prompt_text}
                 ],
                 temperature=0.0,
-                max_tokens=10
+                reasoning_effort="low",
+                max_tokens=200
             )
-            answer = response.choices[0].message.content.strip().upper()
+            answer = (response.choices[0].message.content or "").strip().upper()
+            if not answer:
+                # Reasoning model returned no visible content (e.g. cut off) — don't
+                # silently trust the match; treat as unresolved and try the next fallback.
+                raise ValueError("Empty response content from Groq semantic check")
             return 'NO' not in answer
         except Exception as e:
             print(f"Semantic Consistency Check (Groq) error: {e}")
@@ -826,7 +832,7 @@ def check_with_groq(query, api_key, live_context=""):
         """
         
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             messages=[
                 {
                     "role": "system",
@@ -841,10 +847,13 @@ def check_with_groq(query, api_key, live_context=""):
             max_tokens=1000,
             top_p=1,
             stream=False,
+            reasoning_effort="low",
             response_format={"type": "json_object"}
         )
         
-        text = completion.choices[0].message.content.strip()
+        text = (completion.choices[0].message.content or "").strip()
+        if not text:
+            raise ValueError("Empty response content from Groq fact-check call")
 
         data = json.loads(text)
 
@@ -1533,11 +1542,16 @@ def ocr_denoise_and_extract_claim(raw_text, groq_key=None, gemini_key=None):
         try:
             client = Groq(api_key=groq_key)
             completion = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="openai/gpt-oss-120b",
                 messages=[{"role": "user", "content": prompt}],
+                reasoning_effort="low",
+                max_tokens=500,
                 response_format={"type": "json_object"}
             )
-            data = json.loads(completion.choices[0].message.content)
+            content = completion.choices[0].message.content
+            if not content:
+                raise ValueError("Empty response content from Groq OCR-claim call")
+            data = json.loads(content)
             headline = data.get('cleaned_headline', '').strip()
             if headline and headline != "NO_CLAIM_FOUND":
                 return headline, data.get('is_likely_news', False)
