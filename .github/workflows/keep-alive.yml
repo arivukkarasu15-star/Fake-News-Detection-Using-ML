@@ -1,0 +1,11 @@
+name: Keep Space Alive
+on:
+  schedule:
+    - cron: '0 */12 * * *'   # every 12 hours
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Space
+        run: curl -sSf https://arivu104-fake-news-detection.hf.space/
