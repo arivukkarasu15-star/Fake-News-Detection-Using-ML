@@ -114,3 +114,4 @@ This will generate a new `model.pkl` and `vectorizer.pkl`.
 - News API integration
 - Better UI
 - Support for multiple languages
+
