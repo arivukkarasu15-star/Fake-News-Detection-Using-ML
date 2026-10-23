@@ -1,0 +1,32 @@
+name: Sync to Hugging Face Space
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out GitHub repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install Git LFS
+        run: git lfs install
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "Missing HF_TOKEN repository secret. Add a Hugging Face write token in GitHub Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add huggingface "https://Arivu104:${HF_TOKEN}@huggingface.co/spaces/Arivu104/fake-news-detection"
+          git push huggingface HEAD:main
