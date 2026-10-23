@@ -29,4 +29,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add huggingface "https://Arivu104:${HF_TOKEN}@huggingface.co/spaces/Arivu104/fake-news-detection"
-          git push huggingface HEAD:main
+          git push --force huggingface HEAD:main
