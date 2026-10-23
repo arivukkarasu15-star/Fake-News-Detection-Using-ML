@@ -1,3 +1,9 @@
+---
+title: Fake News Detector
+sdk: docker
+app_port: 7860
+---
+
 # 📰 Fake News Detection using Machine Learning
 
 A simple web application that detects whether a news article is **Real** or **Fake** using **Machine Learning** and **Natural Language Processing (NLP)**.
