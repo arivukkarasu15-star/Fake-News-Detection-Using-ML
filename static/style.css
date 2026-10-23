@@ -630,3 +630,56 @@ button:hover {
         flex-direction: column;
     }
 }
+
+
+/* Polished controls and mobile header layout */
+#teamBtn {
+    min-height: 44px;
+    padding: 0.55rem 1rem !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 999px;
+    background: var(--surface) !important;
+    color: var(--text-primary) !important;
+    font: 600 0.9rem 'Inter', sans-serif !important;
+    margin-left: 0 !important;
+    box-shadow: var(--shadow-sm);
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#teamBtn:hover {
+    background: var(--surface-solid) !important;
+    border-color: var(--primary) !important;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 768px) {
+    .container {
+        display: flex;
+        flex-direction: column;
+    }
+
+    header {
+        order: 0;
+        margin-bottom: 0.75rem;
+    }
+
+    .top-menu-container {
+        order: 1;
+        position: static;
+        justify-content: space-between;
+        width: 100%;
+        margin: 0 0 1.25rem;
+    }
+
+    main {
+        order: 2;
+        width: 100%;
+    }
+
+    h1 {
+        font-size: clamp(1.1rem, 5.8vw, 1.8rem);
+        line-height: 1.15;
+        white-space: nowrap;
+    }
+}
