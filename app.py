@@ -61,6 +61,12 @@ def load_model():
         with open('vectorizer.pkl', 'rb') as f:
             vectorizer = pickle.load(f)
             
+        # Older/newer scikit-learn releases changed LogisticRegression's
+        # multi_class attribute. This project trained with the default "auto";
+        # restore that default when loading a pickle that predates the field.
+        if isinstance(model, LogisticRegression) and not hasattr(model, 'multi_class'):
+            model.multi_class = 'auto'
+
         print("Model loaded successfully!")
         return vectorizer, model
     except Exception as e:
