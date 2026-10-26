@@ -321,8 +321,17 @@
                     body: JSON.stringify({ text: text, newsapi_key: newsApiKey, serpapi_key: serpApiKey, gemini_api_key: geminiApiKey })
                 });
 
-                const data = await response.json();
+                const data = await response.json().catch(() => ({}));
                 resultBox.classList.remove('analyzing-state');
+
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || `Analysis request failed (${response.status}). Please try again.`);
+                }
+
+                const confidence = Number(data.confidence);
+                if (!Number.isFinite(confidence)) {
+                    throw new Error('The analysis service returned an invalid result. Please try again.');
+                }
 
                 // --- API Error Logic ---
                 const apiAlert = document.getElementById('apiErrorAlert');
@@ -338,7 +347,7 @@
                 resultBox.classList.add(isReal ? 'real' : 'fake');
                 document.getElementById('predictionIcon').innerText = isReal ? '✅' : '🚨';
                 document.getElementById('predictionText').innerText = isReal ? "REAL NEWS" : "FAKE NEWS";
-                document.getElementById('confidenceText').innerText = `Confidence: ${data.confidence.toFixed(1)}%`;
+                document.getElementById('confidenceText').innerText = `Confidence: ${confidence.toFixed(1)}%`;
 
                 // Tiered Verification UI Logic
                 const vText = document.getElementById('verificationText');
@@ -392,7 +401,8 @@
                 }
 
             } catch (error) {
-                alert("Error analyzing text: " + error);
+                resultBox.classList.remove('analyzing-state');
+                alert("Error analyzing text: " + (error.message || error));
             } finally {
                 await finishProgress(btnId, 'Run Analysis');
             }
